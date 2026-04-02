@@ -1,0 +1,272 @@
+"""Reusable PyQt5 widgets for AnnotateEZ.
+
+All widgets receive the live config dictionary and mutate it directly,
+keeping the UI and config in sync without an intermediate model layer.
+"""
+
+import logging
+from typing import Any, Dict
+
+from PyQt5.QtCore import Qt, QSize, pyqtSignal
+from PyQt5.QtGui import QColor, QImage, QPainter, QPen
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QRadioButton,
+    QWidget,
+)
+
+from annotateez.config import DISPLAY_COLORS
+
+logger = logging.getLogger(__name__)
+
+# Maps label color names (as stored in config) to Qt global colors.
+_COLOR_TO_QT: Dict[str, Qt.GlobalColor] = {
+    "black": Qt.black,
+    "red": Qt.red,
+    "green": Qt.green,
+    "blue": Qt.blue,
+    "yellow": Qt.yellow,
+    "magenta": Qt.magenta,
+    "cyan": Qt.cyan,
+    "white": Qt.white,
+}
+
+
+def _label_color(config: Dict[str, Any], label_id: int) -> QColor:
+    """Return the QColor for a label ID looked up from config."""
+    color_name = config["labels"][label_id]["color"]
+    qt_color = _COLOR_TO_QT.get(color_name)
+    if qt_color is None:
+        logger.warning(
+            "Unknown label color '%s' for label %d; defaulting to white.",
+            color_name,
+            label_id,
+        )
+        return QColor(Qt.white)
+    return QColor(qt_color)
+
+
+class Legend(QWidget):
+    """Radio-button group for selecting the active annotation label.
+
+    Displays one button per active label, arranged in a two-row grid.
+    Emits ``label_changed(label_id)`` when the selection changes and
+    updates ``config['active_label']`` in place.
+    """
+
+    label_changed = pyqtSignal(int)
+
+    def __init__(self, config: Dict[str, Any]) -> None:
+        super().__init__()
+        self._config = config
+        layout = QGridLayout()
+
+        counter = 0
+        for i, label in enumerate(config["labels"]):
+            if label["active"]:
+                btn = QRadioButton(label["name"])
+                btn.setFixedSize(QSize(64, 30))
+                btn._label_id = i
+                if i == config["active_label"]:
+                    btn.setChecked(True)
+                btn.toggled.connect(self._on_toggled)
+                layout.addWidget(btn, counter % 2, counter // 2)
+                counter += 1
+
+        self.setLayout(layout)
+
+    def _on_toggled(self) -> None:
+        btn = self.sender()
+        if btn.isChecked():
+            self._config["active_label"] = btn._label_id
+            self.label_changed.emit(btn._label_id)
+
+
+class LabelWidget(QWidget):
+    """Settings row for configuring a single label (name and active state).
+
+    Shows a numeric ID, a color-styled name text box, and an active
+    checkbox. Mutations go directly to ``config['labels'][label_id]``.
+    """
+
+    def __init__(self, config: Dict[str, Any], label_id: int) -> None:
+        super().__init__()
+        self._config = config
+        self._id = label_id
+
+        label_cfg = config["labels"][label_id]
+
+        id_label = QLabel(str(label_id))
+        id_label.setAlignment(Qt.AlignCenter)
+
+        self.textbox = QLineEdit()
+        self.textbox.setFixedSize(QSize(128, 24))
+        self.textbox.setStyleSheet(
+            f"QLineEdit{{background: {label_cfg['color']}}}"
+        )
+        self.textbox.setText(label_cfg["name"])
+        self.textbox.textChanged.connect(self._on_text_changed)
+
+        self.checkbox = QCheckBox()
+        self.checkbox.setStyleSheet(
+            "QCheckBox::indicator{width: 24px; height: 24px;}"
+        )
+        self.checkbox.setChecked(label_cfg["active"])
+        self.checkbox.stateChanged.connect(self._on_state_changed)
+        self._sync_enabled()
+
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(5)
+        layout.addWidget(id_label)
+        layout.addWidget(self.textbox)
+        layout.addWidget(self.checkbox)
+        self.setLayout(layout)
+
+    def _sync_enabled(self) -> None:
+        self.textbox.setEnabled(self.checkbox.isChecked())
+
+    def _on_state_changed(self) -> None:
+        self._config["labels"][self._id]["active"] = self.checkbox.isChecked()
+        self._sync_enabled()
+
+    def _on_text_changed(self) -> None:
+        self._config["labels"][self._id]["name"] = self.textbox.text()
+
+
+class ChannelWidget(QWidget):
+    """Settings row for mapping a single channel to a display color.
+
+    Shows the channel name and a combo box for picking from
+    ``DISPLAY_COLORS``. Updates ``config['channels'][channel_idx]['display_color']``
+    in place.
+    """
+
+    def __init__(self, config: Dict[str, Any], channel_idx: int) -> None:
+        super().__init__()
+        self._config = config
+        self._idx = channel_idx
+
+        channel_cfg = config["channels"][channel_idx]
+
+        name_label = QLabel(channel_cfg["name"])
+        name_label.setFixedHeight(24)
+
+        self.combo = QComboBox()
+        self.combo.addItems(DISPLAY_COLORS)
+        current = channel_cfg.get("display_color", "none")
+        if current in DISPLAY_COLORS:
+            self.combo.setCurrentText(current)
+        self.combo.currentTextChanged.connect(self._on_color_changed)
+
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(5)
+        layout.addWidget(name_label)
+        layout.addWidget(self.combo)
+        self.setLayout(layout)
+
+    def _on_color_changed(self, color: str) -> None:
+        self._config["channels"][self._idx]["display_color"] = color
+
+
+class TextBox(QWidget):
+    """Labeled text input that updates a single config key on change.
+
+    Preserves the existing value type: int config values are parsed as
+    int; all others are stored as str. Invalid int input is silently
+    ignored to avoid partial updates during typing.
+    """
+
+    def __init__(
+        self,
+        config: Dict[str, Any],
+        key: str,
+        title: str,
+        default: Any,
+    ) -> None:
+        super().__init__()
+        self._config = config
+        self._key = key
+
+        title_label = QLabel(title)
+        title_label.setFixedHeight(32)
+
+        self.textbox = QLineEdit()
+        self.textbox.setFixedSize(64, 32)
+        self.textbox.setText(str(default))
+        self.textbox.textChanged.connect(self._on_text_changed)
+
+        layout = QHBoxLayout()
+        layout.addWidget(title_label)
+        layout.addWidget(self.textbox)
+        self.setLayout(layout)
+
+    def _on_text_changed(self) -> None:
+        text = self.textbox.text()
+        if not text:
+            return
+        if isinstance(self._config[self._key], int):
+            try:
+                self._config[self._key] = int(text)
+            except ValueError:
+                pass
+        else:
+            self._config[self._key] = text
+
+
+class Pos(QWidget):
+    """Tile widget displaying one event image with a label-colored border.
+
+    Left-click assigns the current active label; right-click resets the
+    label to 0 (class 0 / junk). Emits ``annotated(event_id, label)``
+    after each click so the caller can update the backing DataFrame.
+    """
+
+    annotated = pyqtSignal(int, int)
+
+    def __init__(
+        self,
+        config: Dict[str, Any],
+        event_id: int,
+        image: QImage,
+        label: int,
+    ) -> None:
+        super().__init__()
+        self._config = config
+        self.event_id = event_id
+        self.image = image
+        self.label = label
+        self.setFixedSize(QSize(config["tile_size"], config["tile_size"]))
+
+    def reset(self, event_id: int, image: QImage, label: int) -> None:
+        """Update tile content and trigger a repaint."""
+        self.event_id = event_id
+        self.image = image
+        self.label = label
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        r = event.rect()
+        painter.drawImage(r, self.image)
+        pen = QPen(_label_color(self._config, self.label))
+        pen.setWidth(4)
+        painter.setPen(pen)
+        painter.drawRect(r)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.RightButton:
+            self.label = 0
+        elif event.button() == Qt.LeftButton:
+            self.label = self._config["active_label"]
+        else:
+            return
+        self.annotated.emit(self.event_id, self.label)
+        self.update()
