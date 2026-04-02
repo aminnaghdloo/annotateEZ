@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "annotate-ez"
+version = "0.1.0"
+description = "A GUI tool for visualizing and annotating immunofluorescence microscopy cell images."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Amin Naghdloo", email = "amin.naghdloo@gmail.com" }]
+keywords = [
+    "microscopy",
+    "annotation",
+    "image analysis",
+    "immunofluorescence",
+    "single-cell",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.8",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "h5py==3.1.0",
+    "numpy==1.21.1",
+    "pandas==1.3.1",
+    "PyQt5==5.12.3",
+    "PyYAML==6.0.1",
+    "tables==3.8.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+
+[project.scripts]
+annotate-ez = "annotateez.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/aminnaghdloo/annotateEZ"
+Repository = "https://github.com/aminnaghdloo/annotateEZ"
+"Bug Tracker" = "https://github.com/aminnaghdloo/annotateEZ/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["annotateez*"]
+
+[tool.setuptools.package-data]
+annotateez = ["icons/*.png"]

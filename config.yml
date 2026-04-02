@@ -33,7 +33,7 @@ labels:
   color: cyan
   name: PIC-WBC
 mask_key: masks
-output_dir: /home/amin/Dropbox/Education/PhD/CSI/Projects/P18_LEV_characterization/data/E06_IMC/IMC_queue/data
+output_dir: /mnt/usb/T480s/Dropbox_20260201/Education/PhD/CSI/Projects/P18_LEV_characterization/data/E06_IMC/IMC_queue/data
 tile_size: 85
 x_size: 15
 y_size: 15
