@@ -7,10 +7,11 @@ persists the config to disk when the dialog is dismissed.
 import logging
 from typing import Any, Dict
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QDialog,
     QFileDialog,
+    QHBoxLayout,
     QLabel,
     QPushButton,
     QVBoxLayout,
@@ -26,9 +27,12 @@ class SettingsDialog(QDialog):
     """Modal dialog for editing labels, channel colors, and config values.
 
     All widgets mutate the config dict in place as the user types.
-    ``save_config`` is called automatically when the dialog closes so
-    changes survive the next launch.
+    Clicking Apply emits ``applied`` so the caller can re-render immediately
+    without closing the dialog. Clicking Close (or the window X) saves config
+    and dismisses the dialog.
     """
+
+    applied = pyqtSignal()
 
     def __init__(self, config: Dict[str, Any]) -> None:
         super().__init__()
@@ -77,7 +81,22 @@ class SettingsDialog(QDialog):
         ]:
             layout.addWidget(TextBox(config, key, title, config[key]))
 
+        # --- Apply / Close buttons ---
+        apply_btn = QPushButton("Apply")
+        apply_btn.pressed.connect(self._on_apply)
+        close_btn = QPushButton("Close")
+        close_btn.pressed.connect(self.accept)
+
+        btn_row = QHBoxLayout()
+        btn_row.addWidget(apply_btn)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
         self.setLayout(layout)
+
+    def _on_apply(self) -> None:
+        self.applied.emit()
+        logger.debug("Settings applied.")
 
     def _choose_output_dir(self) -> None:
         path = self._dir_dialog.getExistingDirectory(

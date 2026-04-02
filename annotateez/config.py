@@ -96,12 +96,16 @@ def merge_channels(
         config: The application configuration dictionary.
         channel_names: Ordered list of channel names read from an HDF5 file.
     """
-    existing: Dict[str, str] = {
-        ch["name"]: ch.get("display_color", "none")
+    existing: Dict[str, Any] = {
+        ch["name"]: ch
         for ch in config.get("channels", [])
     }
     config["channels"] = [
-        {"name": name, "display_color": existing.get(name, "none")}
+        {
+            "name": name,
+            "display_color": existing.get(name, {}).get("display_color", "none"),
+            "gain": existing.get(name, {}).get("gain", 1.0),
+        }
         for name in channel_names
     ]
 

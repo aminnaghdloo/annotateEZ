@@ -12,6 +12,7 @@ from PyQt5.QtGui import QColor, QImage, QPainter, QPen
 from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -140,11 +141,10 @@ class LabelWidget(QWidget):
 
 
 class ChannelWidget(QWidget):
-    """Settings row for mapping a single channel to a display color.
+    """Settings row for mapping a single channel to a display color and gain.
 
-    Shows the channel name and a combo box for picking from
-    ``DISPLAY_COLORS``. Updates ``config['channels'][channel_idx]['display_color']``
-    in place.
+    Shows the channel name, a display-color combo box, and a gain spin box.
+    Updates ``config['channels'][channel_idx]`` in place.
     """
 
     def __init__(self, config: Dict[str, Any], channel_idx: int) -> None:
@@ -164,15 +164,27 @@ class ChannelWidget(QWidget):
             self.combo.setCurrentText(current)
         self.combo.currentTextChanged.connect(self._on_color_changed)
 
+        self.gain_spin = QDoubleSpinBox()
+        self.gain_spin.setRange(0.01, 1000.0)
+        self.gain_spin.setDecimals(2)
+        self.gain_spin.setSingleStep(0.5)
+        self.gain_spin.setValue(float(channel_cfg.get("gain", 1.0)))
+        self.gain_spin.setFixedWidth(72)
+        self.gain_spin.valueChanged.connect(self._on_gain_changed)
+
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(5)
         layout.addWidget(name_label)
         layout.addWidget(self.combo)
+        layout.addWidget(self.gain_spin)
         self.setLayout(layout)
 
     def _on_color_changed(self, color: str) -> None:
         self._config["channels"][self._idx]["display_color"] = color
+
+    def _on_gain_changed(self, value: float) -> None:
+        self._config["channels"][self._idx]["gain"] = value
 
 
 class TextBox(QWidget):

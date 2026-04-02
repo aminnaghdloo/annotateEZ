@@ -41,6 +41,7 @@ _CELL_COLORS: np.ndarray = np.array(
 def channels_to_rgb8(
     images: np.ndarray,
     channel_colors: List[str],
+    channel_gains: Optional[List[float]] = None,
 ) -> np.ndarray:
     """Convert multi-channel uint16 images to 8-bit RGB for display.
 
@@ -53,6 +54,9 @@ def channels_to_rgb8(
         images: Input array of shape (N, H, W, C) with dtype uint16.
         channel_colors: List of display colors of length C. Each entry
             must be one of "red", "green", "blue", "gray", or "none".
+        channel_gains: Optional per-channel gain multipliers of length C.
+            Each channel is multiplied by its gain before accumulation.
+            Values above 65535 are clipped. Defaults to 1.0 for all channels.
 
     Returns:
         RGB array of shape (N, H, W, 3) with dtype uint8.
@@ -85,6 +89,8 @@ def channels_to_rgb8(
         if idx == -1:
             continue
         channel = images[..., i].astype(np.float64)
+        if channel_gains is not None:
+            channel = channel * channel_gains[i]
         if idx is None:  # gray: contribute to all three channels equally
             rgb[..., 0] += channel
             rgb[..., 1] += channel

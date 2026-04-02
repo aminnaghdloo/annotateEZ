@@ -84,31 +84,40 @@ def test_save_load_round_trip(tmp_path, monkeypatch):
 # --- merge_channels ---
 
 def test_merge_channels_new_channels():
-    """New channels default to display_color 'none'."""
+    """New channels default to display_color 'none' and gain 1.0."""
     config = {"channels": []}
     merge_channels(config, ["DAPI", "CD45"])
 
     assert config["channels"] == [
-        {"name": "DAPI", "display_color": "none"},
-        {"name": "CD45", "display_color": "none"},
+        {"name": "DAPI", "display_color": "none", "gain": 1.0},
+        {"name": "CD45", "display_color": "none", "gain": 1.0},
     ]
 
 
 def test_merge_channels_preserves_existing_colors():
     """Known channels keep their existing display_color."""
-    config = {"channels": [{"name": "DAPI", "display_color": "blue"}]}
+    config = {"channels": [{"name": "DAPI", "display_color": "blue", "gain": 1.0}]}
     merge_channels(config, ["DAPI", "CD45"])
 
     assert config["channels"][0]["display_color"] == "blue"
     assert config["channels"][1]["display_color"] == "none"
 
 
+def test_merge_channels_preserves_existing_gain():
+    """Known channels keep their existing gain value."""
+    config = {"channels": [{"name": "DAPI", "display_color": "blue", "gain": 3.5}]}
+    merge_channels(config, ["DAPI", "CD45"])
+
+    assert config["channels"][0]["gain"] == 3.5
+    assert config["channels"][1]["gain"] == 1.0
+
+
 def test_merge_channels_order_follows_names():
     """Output order matches channel_names, regardless of config order."""
     config = {
         "channels": [
-            {"name": "CD45", "display_color": "green"},
-            {"name": "DAPI", "display_color": "blue"},
+            {"name": "CD45", "display_color": "green", "gain": 2.0},
+            {"name": "DAPI", "display_color": "blue", "gain": 1.0},
         ]
     }
     merge_channels(config, ["DAPI", "CD45"])

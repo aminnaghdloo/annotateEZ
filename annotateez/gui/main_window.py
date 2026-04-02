@@ -136,8 +136,18 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _open_settings(self) -> None:
-        SettingsDialog(self._config).exec_()
+        dlg = SettingsDialog(self._config)
+        dlg.applied.connect(self._apply_settings)
+        dlg.exec_()
         self._deploy_config()
+
+    def _apply_settings(self) -> None:
+        """Re-render current images with updated channel settings."""
+        if self._eventset is None:
+            return
+        self._deploy_config()
+        self._rgb_images = self._render_rgb()
+        self._reset_grid()
 
     # ------------------------------------------------------------------
     # Grid helpers
@@ -254,6 +264,36 @@ class MainWindow(QMainWindow):
         self._sync_grid_to_df()
 
     # ------------------------------------------------------------------
+    # Rendering
+    # ------------------------------------------------------------------
+
+    def _render_rgb(self) -> np.ndarray:
+        """Convert raw images to padded uint8 RGB using current channel config."""
+        channel_colors = [
+            ch.get("display_color", "none") for ch in self._config["channels"]
+        ]
+        channel_gains = [
+            float(ch.get("gain", 1.0)) for ch in self._config["channels"]
+        ]
+        rgb = channels_to_rgb8(self._eventset.images, channel_colors, channel_gains)
+
+        if self._config.get("show_masks") and self._eventset.masks is not None:
+            rgb = np.stack([
+                overlay_mask_boundaries(rgb[i], self._eventset.masks[i])
+                for i in range(len(rgb))
+            ])
+
+        n_padded = self._n_pages * self._x_size * self._y_size
+        if n_padded > self._n_events:
+            pad = np.zeros(
+                (n_padded - self._n_events, rgb.shape[1], rgb.shape[2], 3),
+                dtype=np.uint8,
+            )
+            rgb = np.concatenate((rgb, pad), axis=0)
+
+        return rgb
+
+    # ------------------------------------------------------------------
     # File I/O
     # ------------------------------------------------------------------
 
@@ -278,36 +318,13 @@ class MainWindow(QMainWindow):
 
         merge_channels(self._config, eventset.channel_names)
 
-        channel_colors = [
-            ch.get("display_color", "none") for ch in self._config["channels"]
-        ]
-        rgb = channels_to_rgb8(eventset.images, channel_colors)
-
-        if self._config.get("show_masks") and eventset.masks is not None:
-            rgb = np.stack([
-                overlay_mask_boundaries(rgb[i], eventset.masks[i])
-                for i in range(len(rgb))
-            ])
-
-        n_events = len(eventset.df)
-        n_per_page = self._x_size * self._y_size
-        n_pages = math.ceil(n_events / n_per_page)
-        n_padded = n_pages * n_per_page
-
-        if n_padded > n_events:
-            pad = np.zeros(
-                (n_padded - n_events, rgb.shape[1], rgb.shape[2], 3),
-                dtype=np.uint8,
-            )
-            rgb = np.concatenate((rgb, pad), axis=0)
-
         if "label" not in eventset.df.columns:
-            eventset.df["label"] = np.zeros(n_events, dtype=np.uint8)
+            eventset.df["label"] = np.zeros(len(eventset.df), dtype=np.uint8)
 
         self._eventset = eventset
-        self._rgb_images = rgb
-        self._n_events = n_events
-        self._n_pages = n_pages
+        self._n_events = len(eventset.df)
+        self._n_pages = math.ceil(self._n_events / (self._x_size * self._y_size))
+        self._rgb_images = self._render_rgb()
         self._f_name = path.stem
         self._current_page = 1
         self._update_page_label()

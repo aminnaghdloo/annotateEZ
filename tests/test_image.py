@@ -72,6 +72,22 @@ def test_channels_to_rgb8_clips_overflow():
     assert result[0, 0, 0, 1] == 255   # 80000 → clipped to 65535 → 255
 
 
+def test_channels_to_rgb8_gain_amplifies():
+    """A gain > 1 multiplies the channel value before accumulation."""
+    images = np.full((1, 1, 1, 1), 256, dtype=np.uint16)  # → 1 without gain
+    result = channels_to_rgb8(images, ["red"], channel_gains=[2.0])
+
+    assert result[0, 0, 0, 0] == 2   # 256 * 2 / 256 = 2
+
+
+def test_channels_to_rgb8_gain_clips():
+    """Gain that overflows uint16 range is clipped to 255 in uint8."""
+    images = np.full((1, 1, 1, 1), 40000, dtype=np.uint16)
+    result = channels_to_rgb8(images, ["red"], channel_gains=[10.0])
+
+    assert result[0, 0, 0, 0] == 255   # 400000 → clipped to 65535 → 255
+
+
 def test_channels_to_rgb8_raises_not_4d():
     images = np.zeros((4, 4, 1), dtype=np.uint16)
     with pytest.raises(ValueError, match="4-D"):
