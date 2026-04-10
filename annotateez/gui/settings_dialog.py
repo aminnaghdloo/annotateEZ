@@ -9,6 +9,7 @@ from typing import Any, Dict
 
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
+    QComboBox,
     QDialog,
     QFileDialog,
     QHBoxLayout,
@@ -81,6 +82,18 @@ class SettingsDialog(QDialog):
             ("max_undo_steps", "max undo steps"),
         ]:
             layout.addWidget(TextBox(config, key, title, config[key]))
+
+        # --- Theme selector ---
+        theme_row = QHBoxLayout()
+        theme_row.addWidget(QLabel("theme"))
+        theme_combo = QComboBox()
+        theme_combo.addItems(["dark", "light"])
+        theme_combo.setCurrentText(config.get("theme", "dark"))
+        theme_combo.currentTextChanged.connect(
+            lambda t: config.__setitem__("theme", t)
+        )
+        theme_row.addWidget(theme_combo)
+        layout.addLayout(theme_row)
 
         # --- Apply / Close buttons ---
         apply_btn = QPushButton("Apply")

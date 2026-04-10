@@ -25,6 +25,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "active_label": 1,
     "channels": [],
     "max_undo_steps": 3,
+    "theme": "dark",
     "data_key": "features",
     "image_key": "images",
     "mask_key": "masks",
@@ -69,6 +70,7 @@ def load_config() -> Dict[str, Any]:
         config.get("tile_size", DEFAULT_CONFIG["tile_size"])
     )
     config.setdefault("max_undo_steps", DEFAULT_CONFIG["max_undo_steps"])
+    config.setdefault("theme", DEFAULT_CONFIG["theme"])
     logger.debug("Loaded config from %s", CONFIG_PATH)
     return config
 

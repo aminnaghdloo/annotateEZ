@@ -26,12 +26,13 @@ from PyQt5.QtWidgets import (
 from annotateez.config import merge_channels
 from annotateez.core.image import channels_to_rgb8, overlay_mask_boundaries
 from annotateez.gui.settings_dialog import SettingsDialog
+from annotateez.gui.theme import apply_theme
 from annotateez.gui.widgets import Legend, Pos, SortPanel
 from annotateez.io.eventset import EventSet
 
 logger = logging.getLogger(__name__)
 
-_ICON_DIR = Path(__file__).resolve().parent.parent / "icons"
+_ICON_DIR = Path(__file__).resolve().parent.parent / "icon"
 
 
 def _tool_button(text: str, icon_name: str) -> QToolButton:
@@ -124,17 +125,33 @@ class MainWindow(QMainWindow):
         settings_btn = _tool_button("Settings", "Settings.png")
         settings_btn.pressed.connect(self._open_settings)
 
+        left_panel = QHBoxLayout()
+        left_panel.setContentsMargins(2,2,2,2)
+        left_panel.setSpacing(5)
+        left_panel.addWidget(self._sort_panel)
+        left_panel.addWidget(self._legend)
+        left_widget = QWidget()
+        left_widget.setLayout(left_panel)
+        left_widget.setFixedWidth(400)
+
+        right_panel = QHBoxLayout()
+        right_panel.setContentsMargins(2,2,2,2)
+        right_panel.setSpacing(5)
+        right_panel.addWidget(select_all_btn)
+        right_panel.addWidget(select_none_btn)
+        right_panel.addWidget(prev_btn)
+        right_panel.addWidget(self._page_label)
+        right_panel.addWidget(next_btn)
+        right_panel.addWidget(save_btn)
+        right_panel.addWidget(load_btn)
+        right_panel.addWidget(settings_btn)
+        right_widget = QWidget()
+        right_widget.setLayout(right_panel)
+        right_widget.setFixedWidth(600)
+
         toolbar = QHBoxLayout()
-        toolbar.addWidget(self._legend)
-        toolbar.addWidget(select_all_btn)
-        toolbar.addWidget(select_none_btn)
-        toolbar.addWidget(prev_btn)
-        toolbar.addWidget(self._page_label)
-        toolbar.addWidget(next_btn)
-        toolbar.addWidget(save_btn)
-        toolbar.addWidget(load_btn)
-        toolbar.addWidget(settings_btn)
-        toolbar.addWidget(self._sort_panel)
+        toolbar.addWidget(left_widget)
+        toolbar.addWidget(right_widget)
 
         main_box = QVBoxLayout()
         main_box.addLayout(self._grid)
@@ -174,6 +191,7 @@ class MainWindow(QMainWindow):
 
     def _apply_settings(self) -> None:
         """Rebuild the grid with updated settings."""
+        apply_theme(QApplication.instance(), self._config.get("theme", "dark"))
         if self._eventset is None:
             return
         self._deploy_config()

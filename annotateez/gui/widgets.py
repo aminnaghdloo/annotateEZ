@@ -8,7 +8,7 @@ import logging
 from typing import Any, Dict, List
 
 from PyQt5.QtCore import Qt, QPoint, QSize, pyqtSignal
-from PyQt5.QtGui import QColor, QImage, QPainter, QPen
+from PyQt5.QtGui import QColor, QIcon, QImage, QPainter, QPen, QPixmap
 from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -18,6 +18,7 @@ from PyQt5.QtWidgets import (
     QLineEdit,
     QPushButton,
     QRadioButton,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -52,11 +53,23 @@ def _label_color(config: Dict[str, Any], label_id: int) -> QColor:
     return QColor(qt_color)
 
 
+_SWATCH_SIZE: int = 12  # side length in pixels of the color swatch
+
+
+def _color_swatch(color_name: str) -> QIcon:
+    """Return a small filled square icon for the given color name."""
+    px = QPixmap(_SWATCH_SIZE, _SWATCH_SIZE)
+    qt_color = _COLOR_TO_QT.get(color_name, Qt.white)
+    px.fill(QColor(qt_color))
+    return QIcon(px)
+
+
 class Legend(QWidget):
     """Dropdown for selecting the active annotation label.
 
-    Displays one entry per active label. Emits ``label_changed(label_id)``
-    when the selection changes and updates ``config['active_label']`` in place.
+    Each entry shows a colored swatch next to the label name. Emits
+    ``label_changed(label_id)`` on selection change and updates
+    ``config['active_label']`` in place.
     """
 
     label_changed = pyqtSignal(int)
@@ -69,7 +82,9 @@ class Legend(QWidget):
         self._combo = QComboBox()
         for i, label in enumerate(config["labels"]):
             if label["active"]:
-                self._combo.addItem(label["name"])
+                self._combo.addItem(
+                    _color_swatch(label["color"]), label["name"]
+                )
                 self._id_map.append(i)
 
         active = config.get("active_label", 1)
@@ -80,6 +95,7 @@ class Legend(QWidget):
 
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
         layout.addWidget(QLabel("Label:"))
         layout.addWidget(self._combo)
         self.setLayout(layout)
@@ -324,7 +340,6 @@ class SortPanel(QWidget):
         super().__init__()
 
         self._col_combo = QComboBox()
-        self._col_combo.setMinimumWidth(120)
 
         self._asc_btn = QRadioButton("Asc")
         self._desc_btn = QRadioButton("Desc")
@@ -333,14 +348,26 @@ class SortPanel(QWidget):
         apply_btn = QPushButton("Sort")
         apply_btn.pressed.connect(self._on_apply)
 
-        layout = QHBoxLayout()
+        # Row 1: label + column selector
+        row1 = QHBoxLayout()
+        row1.setContentsMargins(0, 0, 0, 0)
+        row1.setSpacing(4)
+        row1.addWidget(QLabel("Sort by:"))
+        row1.addWidget(self._col_combo)
+
+        # Row 2: direction radios + apply button
+        row2 = QHBoxLayout()
+        row2.setContentsMargins(0, 0, 0, 0)
+        row2.setSpacing(4)
+        row2.addWidget(self._asc_btn)
+        row2.addWidget(self._desc_btn)
+        row2.addWidget(apply_btn)
+
+        layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
-        layout.addWidget(QLabel("Sort by:"))
-        layout.addWidget(self._col_combo)
-        layout.addWidget(self._asc_btn)
-        layout.addWidget(self._desc_btn)
-        layout.addWidget(apply_btn)
+        layout.addLayout(row1)
+        layout.addLayout(row2)
         self.setLayout(layout)
 
     def set_columns(self, columns: List[str]) -> None:

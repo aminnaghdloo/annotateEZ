@@ -10,6 +10,7 @@ from PyQt5.QtWidgets import QApplication
 
 from annotateez.config import load_config
 from annotateez.gui.main_window import MainWindow
+from annotateez.gui.theme import apply_theme
 
 _LOG_FORMAT_CONSOLE = "[%(levelname)s] %(message)s"
 _LOG_FORMAT_FILE = "%(asctime)s: [%(levelname)s] %(message)s"
@@ -36,5 +37,6 @@ def main() -> None:
     _setup_logging()
     config = load_config()
     app = QApplication(sys.argv)
+    apply_theme(app, config.get("theme", "dark"))
     _window = MainWindow(config)
     sys.exit(app.exec_())
