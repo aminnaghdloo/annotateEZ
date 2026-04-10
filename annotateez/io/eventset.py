@@ -20,30 +20,42 @@ logger = logging.getLogger(__name__)
 class EventSet:
     """An annotatable set of event images, features, and optional masks.
 
+    The HDF5 file is kept open for the lifetime of the object so that
+    images and masks can be read on demand rather than loaded all at once.
+    Call ``close()`` (or use as a context manager) when done.
+
     Attributes:
-        images: uint16 array of shape (N, H, W, C).
         df: DataFrame with per-event features, including a "label" column.
-        masks: Integer array of shape (N, H, W), or None if not present.
         channel_names: Ordered list of channel name strings.
         path: Source HDF5 file path; used when saving.
         data_key: HDF5 key under which the DataFrame is stored.
+        n_events: Total number of events (N).
+        image_shape: Spatial and channel dimensions (H, W, C).
+        image_dtype: numpy dtype of the raw image data.
     """
 
     def __init__(
         self,
-        images: np.ndarray,
+        h5file: h5py.File,
+        image_key: str,
+        mask_key: Optional[str],
         df: pd.DataFrame,
-        masks: Optional[np.ndarray],
         channel_names: List[str],
         path: Path,
         data_key: str,
     ) -> None:
-        self.images = images
+        self._h5file = h5file
+        self._image_key = image_key
+        self._mask_key = mask_key
         self.df = df
-        self.masks = masks
         self.channel_names = channel_names
         self.path = path
         self.data_key = data_key
+
+        ds = h5file[image_key]
+        self.n_events: int = ds.shape[0]
+        self.image_shape: tuple = ds.shape[1:]   # (H, W, C)
+        self.image_dtype: np.dtype = ds.dtype
 
     # ------------------------------------------------------------------
     # Construction
@@ -57,24 +69,27 @@ class EventSet:
         data_key: str,
         mask_key: Optional[str] = None,
     ) -> "EventSet":
-        """Load an event set from an HDF5 file.
+        """Open an HDF5 file and return a lazily-reading EventSet.
+
+        Validation and channel-name metadata are read via a short-lived
+        read-only handle; the DataFrame is then read while no h5py handle
+        is open; finally the file is reopened in read-write mode for
+        subsequent lazy image/mask access and in-place saving.
 
         Args:
             path: Path to the HDF5 file.
-            image_key: Dataset key for the image array, expected shape
-                (N, H, W, C) with dtype uint16.
-            data_key: Dataset key for the pandas DataFrame stored via
-                df.to_hdf().
-            mask_key: Dataset key for the mask array, expected shape
-                (N, H, W) or (N, H, W, 1). Pass None to skip masks.
+            image_key: Dataset key for the image array (N, H, W, C) uint16.
+            data_key: Dataset key for the pandas DataFrame.
+            mask_key: Dataset key for the mask array (N, H, W). None to skip.
 
         Returns:
-            A fully populated EventSet instance.
+            An EventSet with the HDF5 file open for reading.
 
         Raises:
             KeyError: If image_key or data_key is not found in the file.
             ValueError: If the image array is not 4-D.
         """
+        # Phase 1: validate and read metadata with a short-lived handle.
         with h5py.File(path, "r") as fh:
             keys = list(fh.keys())
             logger.debug("HDF5 keys in %s: %s", path.name, keys)
@@ -84,14 +99,15 @@ class EventSet:
                     f"Image key '{image_key}' not found in {path.name}. "
                     f"Available keys: {keys}"
                 )
-            images = fh[image_key][:]
-            if images.ndim != 4:
+            if fh[image_key].ndim != 4:
                 raise ValueError(
                     f"Expected 4-D image array (N, H, W, C), "
-                    f"got shape {images.shape}."
+                    f"got shape {fh[image_key].shape}."
                 )
             logger.info(
-                "Loaded images: shape=%s, dtype=%s", images.shape, images.dtype
+                "Opened images: shape=%s, dtype=%s",
+                fh[image_key].shape,
+                fh[image_key].dtype,
             )
 
             channel_names: List[str] = []
@@ -102,17 +118,12 @@ class EventSet:
                 ]
                 logger.debug("Channels: %s", channel_names)
 
-            masks: Optional[np.ndarray] = None
+            resolved_mask_key = None
             if mask_key and mask_key in keys:
-                masks = fh[mask_key][:]
-                if masks.ndim == 4 and masks.shape[3] == 1:
-                    masks = masks[..., 0]
-                logger.info(
-                    "Loaded masks: shape=%s, dtype=%s",
-                    masks.shape,
-                    masks.dtype,
-                )
+                resolved_mask_key = mask_key
+                logger.info("Masks available at key '%s'.", mask_key)
 
+        # Phase 2: read DataFrame while h5py is closed (avoids file-lock conflict).
         if data_key not in keys:
             raise KeyError(
                 f"Data key '{data_key}' not found in {path.name}. "
@@ -121,7 +132,50 @@ class EventSet:
         df = pd.read_hdf(str(path), key=data_key)
         logger.info("Loaded features: shape=%s", df.shape)
 
-        return cls(images, df, masks, channel_names, path, data_key)
+        # Phase 3: reopen in read-write mode for persistent lazy access.
+        h5file = h5py.File(path, "r+")
+        return cls(h5file, image_key, resolved_mask_key, df, channel_names, path, data_key)
+
+    # ------------------------------------------------------------------
+    # Lazy I/O
+    # ------------------------------------------------------------------
+
+    @property
+    def has_masks(self) -> bool:
+        """True if a mask dataset is available in the HDF5 file."""
+        return self._mask_key is not None
+
+    def read_images(self, indices: np.ndarray) -> np.ndarray:
+        """Read a subset of images from the open HDF5 file.
+
+        Args:
+            indices: 1-D integer array of row indices to read.
+
+        Returns:
+            uint16 array of shape (len(indices), H, W, C).
+        """
+        sorted_idx = np.sort(indices)
+        images = self._h5file[self._image_key][sorted_idx]
+        restore = np.argsort(np.argsort(indices))
+        return images[restore]
+
+    def read_masks(self, indices: np.ndarray) -> Optional[np.ndarray]:
+        """Read a subset of masks from the open HDF5 file.
+
+        Args:
+            indices: 1-D integer array of row indices to read.
+
+        Returns:
+            Integer array of shape (len(indices), H, W), or None if no masks.
+        """
+        if self._mask_key is None:
+            return None
+        sorted_idx = np.sort(indices)
+        masks = self._h5file[self._mask_key][sorted_idx]
+        if masks.ndim == 4 and masks.shape[3] == 1:
+            masks = masks[..., 0]
+        restore = np.argsort(np.argsort(indices))
+        return masks[restore]
 
     # ------------------------------------------------------------------
     # Persistence
@@ -130,21 +184,44 @@ class EventSet:
     def save(self, label_names: List[str]) -> None:
         """Write annotated features and the label map back to the source file.
 
-        Overwrites the DataFrame at self.data_key and refreshes the
-        "labels" dataset with the current label name mapping.
+        The h5py handle is temporarily closed so that pandas (PyTables) can
+        open the same file without a locking conflict, then reopened.
 
         Args:
-            label_names: Ordered list of label class names to store in
-                the "labels" dataset as UTF-8-encoded strings.
+            label_names: Ordered list of label class names.
         """
-        self.df.to_hdf(str(self.path), key=self.data_key, mode="r+")
-        logger.debug("Wrote features to HDF5 key '%s'.", self.data_key)
+        # Close h5py so pandas can acquire the file lock.
+        self._h5file.close()
+        try:
+            self.df.to_hdf(str(self.path), key=self.data_key, mode="r+")
+            logger.debug("Wrote features to HDF5 key '%s'.", self.data_key)
+        finally:
+            self._h5file = h5py.File(self.path, "r+")
 
-        with h5py.File(self.path, "r+") as fh:
-            if "labels" in fh:
-                del fh["labels"]
-            fh.create_dataset(
-                "labels",
-                data=[name.encode("utf-8") for name in label_names],
-            )
+        if "labels" in self._h5file:
+            del self._h5file["labels"]
+        self._h5file.create_dataset(
+            "labels",
+            data=[name.encode("utf-8") for name in label_names],
+        )
+        self._h5file.flush()
         logger.info("Saved annotations and label map to %s.", self.path.name)
+
+    # ------------------------------------------------------------------
+    # Resource management
+    # ------------------------------------------------------------------
+
+    def close(self) -> None:
+        """Close the underlying HDF5 file handle."""
+        if self._h5file and self._h5file.id.valid:
+            self._h5file.close()
+            logger.debug("Closed HDF5 file %s.", self.path.name)
+
+    def __enter__(self) -> "EventSet":
+        return self
+
+    def __exit__(self, *args) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        self.close()

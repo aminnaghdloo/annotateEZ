@@ -11,30 +11,28 @@ from annotateez.io.eventset import EventSet
 # --- EventSet.load ---
 
 def test_load_images_shape_and_dtype(hdf5_file):
-    es = EventSet.load(hdf5_file, image_key="images", data_key="features")
-
-    assert es.images.shape == (5, 8, 8, 2)
-    assert es.images.dtype == np.uint16
+    with EventSet.load(hdf5_file, image_key="images", data_key="features") as es:
+        assert es.n_events == 5
+        assert es.image_shape == (8, 8, 2)
+        assert es.image_dtype == np.uint16
 
 
 def test_load_dataframe(hdf5_file):
-    es = EventSet.load(hdf5_file, image_key="images", data_key="features")
-
-    assert len(es.df) == 5
-    assert "label" in es.df.columns
+    with EventSet.load(hdf5_file, image_key="images", data_key="features") as es:
+        assert len(es.df) == 5
+        assert "label" in es.df.columns
 
 
 def test_load_channel_names(hdf5_file):
     """Byte-encoded channel names are decoded to str."""
-    es = EventSet.load(hdf5_file, image_key="images", data_key="features")
-
-    assert es.channel_names == ["DAPI", "CD45"]
+    with EventSet.load(hdf5_file, image_key="images", data_key="features") as es:
+        assert es.channel_names == ["DAPI", "CD45"]
 
 
 def test_load_no_masks_by_default(hdf5_file):
-    es = EventSet.load(hdf5_file, image_key="images", data_key="features")
-
-    assert es.masks is None
+    with EventSet.load(hdf5_file, image_key="images", data_key="features") as es:
+        assert not es.has_masks
+        assert es.read_masks(np.arange(5)) is None
 
 
 def test_load_masks_3d(hdf5_file):
@@ -42,11 +40,10 @@ def test_load_masks_3d(hdf5_file):
     with h5py.File(hdf5_file, "r+") as fh:
         fh.create_dataset("masks", data=np.zeros((5, 8, 8), dtype=np.int32))
 
-    es = EventSet.load(
+    with EventSet.load(
         hdf5_file, image_key="images", data_key="features", mask_key="masks"
-    )
-
-    assert es.masks.shape == (5, 8, 8)
+    ) as es:
+        assert es.read_masks(np.arange(5)).shape == (5, 8, 8)
 
 
 def test_load_masks_4d_squeezed(hdf5_file):
@@ -54,11 +51,10 @@ def test_load_masks_4d_squeezed(hdf5_file):
     with h5py.File(hdf5_file, "r+") as fh:
         fh.create_dataset("masks", data=np.zeros((5, 8, 8, 1), dtype=np.int32))
 
-    es = EventSet.load(
+    with EventSet.load(
         hdf5_file, image_key="images", data_key="features", mask_key="masks"
-    )
-
-    assert es.masks.shape == (5, 8, 8)
+    ) as es:
+        assert es.read_masks(np.arange(5)).shape == (5, 8, 8)
 
 
 def test_load_raises_missing_image_key(hdf5_file):
@@ -83,26 +79,43 @@ def test_load_raises_non_4d_images(tmp_path):
 
 
 def test_load_stores_path_and_data_key(hdf5_file):
-    es = EventSet.load(hdf5_file, image_key="images", data_key="features")
+    with EventSet.load(hdf5_file, image_key="images", data_key="features") as es:
+        assert es.path == hdf5_file
+        assert es.data_key == "features"
 
-    assert es.path == hdf5_file
-    assert es.data_key == "features"
+
+# --- EventSet.read_images ---
+
+def test_read_images_returns_correct_subset(hdf5_file):
+    with EventSet.load(hdf5_file, image_key="images", data_key="features") as es:
+        imgs = es.read_images(np.array([0, 2, 4]))
+        assert imgs.shape == (3, 8, 8, 2)
+        assert imgs.dtype == np.uint16
+
+
+def test_read_images_preserves_order(hdf5_file):
+    with EventSet.load(hdf5_file, image_key="images", data_key="features") as es:
+        all_imgs = es.read_images(np.arange(5))
+        reordered = es.read_images(np.array([4, 0, 2]))
+        np.testing.assert_array_equal(reordered[0], all_imgs[4])
+        np.testing.assert_array_equal(reordered[1], all_imgs[0])
+        np.testing.assert_array_equal(reordered[2], all_imgs[2])
 
 
 # --- EventSet.save ---
 
 def test_save_writes_label_column(hdf5_file):
-    es = EventSet.load(hdf5_file, image_key="images", data_key="features")
-    es.df["label"] = np.array([1, 0, 2, 1, 0], dtype=np.uint8)
-    es.save(["class0", "class1", "class2"])
+    with EventSet.load(hdf5_file, image_key="images", data_key="features") as es:
+        es.df["label"] = np.array([1, 0, 2, 1, 0], dtype=np.uint8)
+        es.save(["class0", "class1", "class2"])
 
-    es2 = EventSet.load(hdf5_file, image_key="images", data_key="features")
-    assert es2.df["label"].tolist() == [1, 0, 2, 1, 0]
+    with EventSet.load(hdf5_file, image_key="images", data_key="features") as es2:
+        assert es2.df["label"].tolist() == [1, 0, 2, 1, 0]
 
 
 def test_save_writes_label_names(hdf5_file):
-    es = EventSet.load(hdf5_file, image_key="images", data_key="features")
-    es.save(["neg", "pos"])
+    with EventSet.load(hdf5_file, image_key="images", data_key="features") as es:
+        es.save(["neg", "pos"])
 
     with h5py.File(hdf5_file, "r") as fh:
         names = [v.decode("utf-8") for v in fh["labels"][:]]
@@ -111,9 +124,9 @@ def test_save_writes_label_names(hdf5_file):
 
 def test_save_overwrites_existing_labels(hdf5_file):
     """Calling save twice replaces the labels dataset."""
-    es = EventSet.load(hdf5_file, image_key="images", data_key="features")
-    es.save(["a", "b"])
-    es.save(["x", "y", "z"])
+    with EventSet.load(hdf5_file, image_key="images", data_key="features") as es:
+        es.save(["a", "b"])
+        es.save(["x", "y", "z"])
 
     with h5py.File(hdf5_file, "r") as fh:
         names = [v.decode("utf-8") for v in fh["labels"][:]]

@@ -7,7 +7,7 @@ keeping the UI and config in sync without an intermediate model layer.
 import logging
 from typing import Any, Dict, List
 
-from PyQt5.QtCore import Qt, QSize, pyqtSignal
+from PyQt5.QtCore import Qt, QPoint, QSize, pyqtSignal
 from PyQt5.QtGui import QColor, QImage, QPainter, QPen
 from PyQt5.QtWidgets import (
     QCheckBox,
@@ -243,12 +243,16 @@ class TextBox(QWidget):
 class Pos(QWidget):
     """Tile widget displaying one event image with a label-colored border.
 
-    Left-click assigns the current active label; right-click resets the
-    label to 0 (class 0 / junk). Emits ``annotated(event_id, label)``
-    after each click so the caller can update the backing DataFrame.
+    Left-click (or drag) assigns the active label; right-click (or drag)
+    resets to label 0. Emits ``annotated(event_id, label)`` on click and
+    ``drag_moved(global_pos, label)`` while dragging so the parent can
+    annotate whichever tile is under the cursor.
     """
 
     annotated = pyqtSignal(int, int)
+    drag_started = pyqtSignal()
+    drag_moved = pyqtSignal(QPoint, int)
+    drag_ended = pyqtSignal()
 
     def __init__(
         self,
@@ -262,6 +266,8 @@ class Pos(QWidget):
         self.event_id = event_id
         self.image = image
         self.label = label
+        self._drag_label: int = 0
+        self._dragging: bool = False
         self.setFixedSize(QSize(config["tile_size"], config["tile_size"]))
 
     def reset(self, event_id: int, image: QImage, label: int) -> None:
@@ -281,15 +287,27 @@ class Pos(QWidget):
         painter.setPen(pen)
         painter.drawRect(r)
 
-    def mouseReleaseEvent(self, event) -> None:
+    def mousePressEvent(self, event) -> None:
         if event.button() == Qt.RightButton:
-            self.label = 0
+            self._drag_label = 0
         elif event.button() == Qt.LeftButton:
-            self.label = self._config["active_label"]
+            self._drag_label = self._config["active_label"]
         else:
             return
+        self._dragging = True
+        self.drag_started.emit()
+        self.label = self._drag_label
         self.annotated.emit(self.event_id, self.label)
         self.update()
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._dragging:
+            self.drag_moved.emit(self.mapToGlobal(event.pos()), self._drag_label)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if self._dragging:
+            self._dragging = False
+            self.drag_ended.emit()
 
 
 class SortPanel(QWidget):

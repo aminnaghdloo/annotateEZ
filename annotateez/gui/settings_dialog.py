@@ -78,6 +78,7 @@ class SettingsDialog(QDialog):
             ("tile_size", "tile size [pixels]"),
             ("x_size", "horizontal tile count"),
             ("y_size", "vertical tile count"),
+            ("max_undo_steps", "max undo steps"),
         ]:
             layout.addWidget(TextBox(config, key, title, config[key]))
 

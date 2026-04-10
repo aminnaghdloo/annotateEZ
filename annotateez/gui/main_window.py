@@ -2,13 +2,15 @@
 
 import logging
 import math
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
-from PyQt5.QtCore import Qt, QSize
+from PyQt5.QtCore import Qt, QPoint, QSize
 from PyQt5.QtGui import QIcon, QImage, QKeySequence
 from PyQt5.QtWidgets import (
+    QApplication,
     QFileDialog,
     QGridLayout,
     QHBoxLayout,
@@ -56,12 +58,14 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._config = config
         self._eventset: Optional[EventSet] = None
-        self._rgb_images: Optional[np.ndarray] = None  # (N_padded, H, W, 3) uint8
         self._n_events: int = 0
         self._current_page: int = 0
         self._n_pages: int = 0
         self._f_name: str = ""
         self._display_order: Optional[np.ndarray] = None
+        self._drag_in_progress: bool = False
+        self._page_cache: Dict[int, np.ndarray] = {}
+        self._cache_lock: threading.Lock = threading.Lock()
         self._undo_history: np.ndarray = np.empty((0, 0))
         self._redo_history: np.ndarray = np.empty((0, 0))
 
@@ -169,13 +173,13 @@ class MainWindow(QMainWindow):
         self._deploy_config()
 
     def _apply_settings(self) -> None:
-        """Re-render and rebuild the grid with updated settings."""
+        """Rebuild the grid with updated settings."""
         if self._eventset is None:
             return
         self._deploy_config()
         self._n_pages = math.ceil(self._n_events / (self._x_size * self._y_size))
         self._current_page = min(self._current_page, max(1, self._n_pages))
-        self._rgb_images = self._render_rgb()
+        self._clear_page_cache()
         self._update_page_label()
         self._init_grid()
 
@@ -195,8 +199,8 @@ class MainWindow(QMainWindow):
             return int(self._display_order[display_idx])
         return display_idx
 
-    def _make_qimage(self, event_id: int) -> QImage:
-        img = self._rgb_images[event_id]
+    def _make_qimage(self, page_images: np.ndarray, local_idx: int) -> QImage:
+        img = np.ascontiguousarray(page_images[local_idx])
         h, w = img.shape[:2]
         return QImage(img.data, w, h, w * 3, QImage.Format_RGB888)
 
@@ -213,24 +217,32 @@ class MainWindow(QMainWindow):
 
     def _init_grid(self) -> None:
         self._clear_grid()
+        page_images = self._get_page_images(self._current_page)
         for x in range(self._x_size):
             for y in range(self._y_size):
+                local_idx = x + self._x_size * y
                 event_id = self._event_id(self._tile_index(x, y))
                 w = Pos(
                     self._config,
                     event_id,
-                    self._make_qimage(event_id),
+                    self._make_qimage(page_images, local_idx),
                     self._get_label(event_id),
                 )
                 w.annotated.connect(self._on_annotated)
+                w.drag_started.connect(self._on_drag_start)
+                w.drag_moved.connect(self._on_drag_move)
+                w.drag_ended.connect(self._on_drag_end)
                 self._grid.addWidget(w, y, x)
+        self._prefetch_adjacent()
 
     def _reset_grid(self) -> None:
+        page_images = self._get_page_images(self._current_page)
         for x in range(self._x_size):
             for y in range(self._y_size):
+                local_idx = x + self._x_size * y
                 event_id = self._event_id(self._tile_index(x, y))
                 w = self._grid.itemAtPosition(y, x).widget()
-                w.reset(event_id, self._make_qimage(event_id), self._get_label(event_id))
+                w.reset(event_id, self._make_qimage(page_images, local_idx), self._get_label(event_id))
 
     def _update_page_label(self) -> None:
         self._page_label.setText(f"{self._current_page} / {self._n_pages}")
@@ -243,10 +255,29 @@ class MainWindow(QMainWindow):
         """Write a single tile annotation immediately to the DataFrame."""
         if self._eventset is None or event_id >= self._n_events:
             return
-        old_label = int(self._eventset.df.label.iat[event_id])
-        if old_label != label:
-            self._push_undo()
+        if not self._drag_in_progress:
+            old_label = int(self._eventset.df.label.iat[event_id])
+            if old_label != label:
+                self._push_undo()
         self._eventset.df.label.iat[event_id] = label
+
+    def _on_drag_start(self) -> None:
+        if self._eventset is None:
+            return
+        self._push_undo()
+        self._drag_in_progress = True
+
+    def _on_drag_move(self, global_pos: QPoint, label: int) -> None:
+        widget = QApplication.widgetAt(global_pos)
+        if not isinstance(widget, Pos) or widget.event_id >= self._n_events:
+            return
+        if widget.label != label:
+            widget.label = label
+            widget.update()
+            self._eventset.df.label.iat[widget.event_id] = label
+
+    def _on_drag_end(self) -> None:
+        self._drag_in_progress = False
 
     def _sync_grid_to_df(self) -> None:
         """Flush all visible tile labels to the DataFrame."""
@@ -262,7 +293,7 @@ class MainWindow(QMainWindow):
 
     def _push_undo(self) -> None:
         """Snapshot current labels into the undo history."""
-        max_steps = self._config.get("history_steps", 3)
+        max_steps = self._config.get("max_undo_steps", 3)
         snapshot = self._eventset.df["label"].to_numpy(copy=True)
         self._undo_history = np.vstack([self._undo_history, snapshot[np.newaxis, :]])
         if len(self._undo_history) > max_steps:
@@ -282,7 +313,7 @@ class MainWindow(QMainWindow):
     def _redo(self) -> None:
         if self._eventset is None or len(self._redo_history) == 0:
             return
-        max_steps = self._config.get("history_steps", 3)
+        max_steps = self._config.get("max_undo_steps", 3)
         current = self._eventset.df["label"].to_numpy(copy=True)
         self._undo_history = np.vstack([self._undo_history, current[np.newaxis, :]])
         if len(self._undo_history) > max_steps:
@@ -303,6 +334,7 @@ class MainWindow(QMainWindow):
         self._sync_grid_to_df()
         order = np.argsort(self._eventset.df[column].to_numpy(), kind="stable")
         self._display_order = order if ascending else order[::-1]
+        self._clear_page_cache()
         self._current_page = 1
         self._update_page_label()
         self._init_grid()
@@ -362,31 +394,69 @@ class MainWindow(QMainWindow):
     # Rendering
     # ------------------------------------------------------------------
 
-    def _render_rgb(self) -> np.ndarray:
-        """Convert raw images to padded uint8 RGB using current channel config."""
+    def _get_page_event_ids(self, page_num: int) -> np.ndarray:
+        """Return the DataFrame row indices for events shown on page_num."""
+        page_size = self._x_size * self._y_size
+        start = (page_num - 1) * page_size
+        end = min(start + page_size, self._n_events)
+        if self._display_order is not None:
+            return self._display_order[start:end]
+        return np.arange(start, end)
+
+    def _render_page_rgb(self, page_num: int) -> np.ndarray:
+        """Read and render images for page_num into a (page_size, H, W, 3) array."""
+        page_size = self._x_size * self._y_size
+        event_ids = self._get_page_event_ids(page_num)
+
         channel_colors = [
             ch.get("display_color", "none") for ch in self._config["channels"]
         ]
         channel_gains = [
             float(ch.get("gain", 1.0)) for ch in self._config["channels"]
         ]
-        rgb = channels_to_rgb8(self._eventset.images, channel_colors, channel_gains)
 
-        if self._config.get("show_masks") and self._eventset.masks is not None:
-            rgb = np.stack([
-                overlay_mask_boundaries(rgb[i], self._eventset.masks[i])
-                for i in range(len(rgb))
-            ])
+        raw = self._eventset.read_images(event_ids)
+        rgb = channels_to_rgb8(raw, channel_colors, channel_gains)
 
-        n_padded = self._n_pages * self._x_size * self._y_size
-        if n_padded > self._n_events:
-            pad = np.zeros(
-                (n_padded - self._n_events, rgb.shape[1], rgb.shape[2], 3),
-                dtype=np.uint8,
-            )
+        if self._config.get("show_masks"):
+            masks = self._eventset.read_masks(event_ids)
+            if masks is not None:
+                rgb = np.stack([
+                    overlay_mask_boundaries(rgb[i], masks[i])
+                    for i in range(len(rgb))
+                ])
+
+        # Pad to a full page if this is the last (short) page.
+        if len(event_ids) < page_size:
+            h, w = rgb.shape[1:3]
+            pad = np.zeros((page_size - len(event_ids), h, w, 3), dtype=np.uint8)
             rgb = np.concatenate((rgb, pad), axis=0)
 
         return rgb
+
+    def _get_page_images(self, page_num: int) -> np.ndarray:
+        """Return cached RGB images for page_num, loading if necessary."""
+        with self._cache_lock:
+            if page_num not in self._page_cache:
+                self._page_cache[page_num] = self._render_page_rgb(page_num)
+            return self._page_cache[page_num]
+
+    def _prefetch_adjacent(self) -> None:
+        """Load the previous and next pages into cache in background threads."""
+        for page in (self._current_page - 1, self._current_page + 1):
+            if 1 <= page <= self._n_pages:
+                threading.Thread(
+                    target=self._prefetch_page, args=(page,), daemon=True
+                ).start()
+
+    def _prefetch_page(self, page_num: int) -> None:
+        with self._cache_lock:
+            if page_num not in self._page_cache:
+                self._page_cache[page_num] = self._render_page_rgb(page_num)
+
+    def _clear_page_cache(self) -> None:
+        with self._cache_lock:
+            self._page_cache.clear()
 
     # ------------------------------------------------------------------
     # File I/O
@@ -416,15 +486,18 @@ class MainWindow(QMainWindow):
         if "label" not in eventset.df.columns:
             eventset.df["label"] = np.zeros(len(eventset.df), dtype=np.uint8)
 
+        if self._eventset is not None:
+            self._eventset.close()
+
         self._eventset = eventset
-        self._n_events = len(eventset.df)
+        self._n_events = eventset.n_events
         self._n_pages = math.ceil(self._n_events / (self._x_size * self._y_size))
         self._display_order = None
+        self._clear_page_cache()
         label_dtype = eventset.df["label"].dtype
         self._undo_history = np.empty((0, self._n_events), dtype=label_dtype)
         self._redo_history = np.empty((0, self._n_events), dtype=label_dtype)
         self._sort_panel.set_columns(list(eventset.df.columns))
-        self._rgb_images = self._render_rgb()
         self._f_name = path.stem
         self._current_page = 1
         self.setWindowTitle(f"AnnotateEZ — {path.stem}")
@@ -455,6 +528,8 @@ class MainWindow(QMainWindow):
             QMessageBox.Yes | QMessageBox.No,
         )
         if reply == QMessageBox.Yes:
+            if self._eventset is not None:
+                self._eventset.close()
             event.accept()
         else:
             event.ignore()
