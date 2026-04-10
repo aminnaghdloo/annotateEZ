@@ -38,6 +38,7 @@ pip install annotate-ez
 ## Usage
 
 ```bash
+# bash command
 annotate-ez
 ```
 
