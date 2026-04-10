@@ -164,12 +164,15 @@ class MainWindow(QMainWindow):
         self._deploy_config()
 
     def _apply_settings(self) -> None:
-        """Re-render current images with updated channel settings."""
+        """Re-render and rebuild the grid with updated settings."""
         if self._eventset is None:
             return
         self._deploy_config()
+        self._n_pages = math.ceil(self._n_events / (self._x_size * self._y_size))
+        self._current_page = min(self._current_page, max(1, self._n_pages))
         self._rgb_images = self._render_rgb()
-        self._reset_grid()
+        self._update_page_label()
+        self._init_grid()
 
     # ------------------------------------------------------------------
     # Grid helpers
