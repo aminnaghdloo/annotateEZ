@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 from PyQt5.QtCore import Qt, QSize
-from PyQt5.QtGui import QIcon, QImage
+from PyQt5.QtGui import QIcon, QImage, QKeySequence
 from PyQt5.QtWidgets import (
     QFileDialog,
     QGridLayout,
@@ -15,6 +15,7 @@ from PyQt5.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
+    QShortcut,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -59,7 +60,7 @@ class MainWindow(QMainWindow):
         self._n_events: int = 0
         self._current_page: int = 0
         self._n_pages: int = 0
-        self._f_name: str = "Empty"
+        self._f_name: str = ""
 
         self._open_settings()
         self._build_ui()
@@ -77,6 +78,7 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         self._deploy_config()
+        self.setWindowTitle("AnnotateEZ")
 
         self._file_dialog = QFileDialog()
         self._file_dialog.setFileMode(QFileDialog.AnyFile)
@@ -197,9 +199,7 @@ class MainWindow(QMainWindow):
                 w.reset(event_id, self._make_qimage(event_id), self._get_label(event_id))
 
     def _update_page_label(self) -> None:
-        self._page_label.setText(
-            f"{self._f_name}\n\n{self._current_page} / {self._n_pages}"
-        )
+        self._page_label.setText(f"{self._current_page} / {self._n_pages}")
 
     # ------------------------------------------------------------------
     # Annotation sync
@@ -327,6 +327,7 @@ class MainWindow(QMainWindow):
         self._rgb_images = self._render_rgb()
         self._f_name = path.stem
         self._current_page = 1
+        self.setWindowTitle(f"AnnotateEZ — {path.stem}")
         self._update_page_label()
         self._init_grid()
 
