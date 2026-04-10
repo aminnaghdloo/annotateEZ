@@ -55,4 +55,4 @@ where = ["."]
 include = ["annotateez*"]
 
 [tool.setuptools.package-data]
-annotateez = ["icons/*.png"]
+annotateez = ["icons/*.png", "config.yml"]

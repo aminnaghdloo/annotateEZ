@@ -1,9 +1,10 @@
 """Configuration management for AnnotateEZ.
 
-Configuration is persisted in the XDG-compliant user config directory:
-    ~/.config/annotate-ez/config.yml
+Configuration is persisted in the package installation directory:
+    <package_dir>/config.yml
 
-A default file is created on first launch if none exists.
+The file is only created when the user saves settings. On first launch,
+built-in defaults are used without writing any file.
 """
 
 import copy
@@ -15,8 +16,7 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-CONFIG_DIR: Path = Path.home() / ".config" / "annotate-ez"
-CONFIG_PATH: Path = CONFIG_DIR / "config.yml"
+CONFIG_PATH: Path = Path(__file__).parent / "config.yml"
 
 #: Valid display colors for channel-to-RGB mapping.
 DISPLAY_COLORS: List[str] = ["red", "green", "blue", "gray", "none"]
@@ -48,21 +48,18 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 
 
 def load_config() -> Dict[str, Any]:
-    """Load configuration from the user config directory.
+    """Load configuration from the package installation directory.
 
-    Creates a default config file if none exists. Ensures tile_size
-    is odd, which is required for symmetric tile rendering.
+    Returns built-in defaults when no saved config exists; does not
+    create a file on first launch. Ensures tile_size is odd, which is
+    required for symmetric tile rendering.
 
     Returns:
         A dictionary containing the full application configuration.
     """
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-
     if not CONFIG_PATH.exists():
-        logger.info("No config found; writing default to %s", CONFIG_PATH)
-        config = copy.deepcopy(DEFAULT_CONFIG)
-        save_config(config)
-        return config
+        logger.info("No config file found; using built-in defaults")
+        return copy.deepcopy(DEFAULT_CONFIG)
 
     with CONFIG_PATH.open("r") as fh:
         config = yaml.safe_load(fh)
@@ -78,12 +75,11 @@ def load_config() -> Dict[str, Any]:
 
 
 def save_config(config: Dict[str, Any]) -> None:
-    """Persist configuration to the user config directory.
+    """Persist configuration to the package installation directory.
 
     Args:
         config: The configuration dictionary to save.
     """
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     with CONFIG_PATH.open("w") as fh:
         yaml.dump(config, fh, default_flow_style=False, allow_unicode=True)
     logger.debug("Saved config to %s", CONFIG_PATH)
