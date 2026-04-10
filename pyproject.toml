@@ -51,8 +51,7 @@ Repository = "https://github.com/aminnaghdloo/annotateEZ"
 "Bug Tracker" = "https://github.com/aminnaghdloo/annotateEZ/issues"
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["annotateez*"]
+where = ["src"]
 
 [tool.setuptools.package-data]
-annotateez = ["icons/*.png", "config.yml"]
+annotateez = ["icons/*.png"]
