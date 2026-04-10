@@ -24,6 +24,7 @@ DISPLAY_COLORS: List[str] = ["red", "green", "blue", "gray", "none"]
 DEFAULT_CONFIG: Dict[str, Any] = {
     "active_label": 1,
     "channels": [],
+    "master_gain": 1.0,
     "max_undo_steps": 3,
     "theme": "dark",
     "data_key": "features",
@@ -69,6 +70,7 @@ def load_config() -> Dict[str, Any]:
     config["tile_size"] = _make_odd(
         config.get("tile_size", DEFAULT_CONFIG["tile_size"])
     )
+    config.setdefault("master_gain", DEFAULT_CONFIG["master_gain"])
     config.setdefault("max_undo_steps", DEFAULT_CONFIG["max_undo_steps"])
     config.setdefault("theme", DEFAULT_CONFIG["theme"])
     logger.debug("Loaded config from %s", CONFIG_PATH)

@@ -19,7 +19,7 @@ from PyQt5.QtWidgets import (
 )
 
 from annotateez.config import save_config
-from annotateez.gui.widgets import ChannelWidget, LabelWidget, TextBox
+from annotateez.gui.widgets import ColorChannelWidget, LabelWidget, TextBox
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +57,8 @@ class SettingsDialog(QDialog):
             channels_title = QLabel("channels")
             channels_title.setAlignment(Qt.AlignCenter)
             layout.addWidget(channels_title)
-            for i in range(len(config["channels"])):
-                layout.addWidget(ChannelWidget(config, i))
+            for color in ("red", "green", "blue", "gray"):
+                layout.addWidget(ColorChannelWidget(config, color))
 
         # --- Configuration section ---
         config_title = QLabel("configuration")
@@ -80,6 +80,7 @@ class SettingsDialog(QDialog):
             ("x_size", "horizontal tile count"),
             ("y_size", "vertical tile count"),
             ("max_undo_steps", "max undo steps"),
+            ("master_gain", "master gain"),
         ]:
             layout.addWidget(TextBox(config, key, title, config[key]))
 

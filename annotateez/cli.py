@@ -4,7 +4,13 @@ Invoked as ``annotate-ez`` (after pip install) or ``python -m annotateez``.
 """
 
 import logging
+import os
 import sys
+
+# Must be set before h5py is imported; some HDF5 builds read this flag
+# during C library initialisation and will fail on certain filesystems
+# (NFS, overlayfs, tmpfs) that do not support POSIX advisory locking.
+os.environ.setdefault("HDF5_USE_FILE_LOCKING", "FALSE")
 
 from PyQt5.QtWidgets import QApplication
 

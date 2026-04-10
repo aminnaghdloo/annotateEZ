@@ -27,12 +27,12 @@ from annotateez.config import merge_channels
 from annotateez.core.image import channels_to_rgb8, overlay_mask_boundaries
 from annotateez.gui.settings_dialog import SettingsDialog
 from annotateez.gui.theme import apply_theme
-from annotateez.gui.widgets import Legend, Pos, SortPanel
+from annotateez.gui.widgets import ChannelViewSelector, Legend, Pos, SortPanel
 from annotateez.io.eventset import EventSet
 
 logger = logging.getLogger(__name__)
 
-_ICON_DIR = Path(__file__).resolve().parent.parent / "icon"
+_ICON_DIR = Path(__file__).resolve().parent.parent / "icons"
 
 
 def _tool_button(text: str, icon_name: str) -> QToolButton:
@@ -64,6 +64,7 @@ class MainWindow(QMainWindow):
         self._n_pages: int = 0
         self._f_name: str = ""
         self._display_order: Optional[np.ndarray] = None
+        self._view_channel: Optional[int] = None
         self._drag_in_progress: bool = False
         self._page_cache: Dict[int, np.ndarray] = {}
         self._cache_lock: threading.Lock = threading.Lock()
@@ -101,6 +102,9 @@ class MainWindow(QMainWindow):
 
         self._legend = Legend(self._config)
 
+        self._channel_view = ChannelViewSelector()
+        self._channel_view.view_changed.connect(self._on_view_changed)
+
         self._sort_panel = SortPanel()
         self._sort_panel.sort_requested.connect(self._apply_sort)
 
@@ -125,17 +129,23 @@ class MainWindow(QMainWindow):
         settings_btn = _tool_button("Settings", "Settings.png")
         settings_btn.pressed.connect(self._open_settings)
 
+        legend_col = QVBoxLayout()
+        legend_col.setContentsMargins(0, 0, 0, 0)
+        legend_col.setSpacing(2)
+        legend_col.addWidget(self._legend)
+        legend_col.addWidget(self._channel_view)
+
         left_panel = QHBoxLayout()
-        left_panel.setContentsMargins(2,2,2,2)
+        left_panel.setContentsMargins(2, 2, 2, 2)
         left_panel.setSpacing(5)
         left_panel.addWidget(self._sort_panel)
-        left_panel.addWidget(self._legend)
+        left_panel.addLayout(legend_col)
         left_widget = QWidget()
         left_widget.setLayout(left_panel)
-        left_widget.setFixedWidth(400)
+        left_widget.setFixedSize(QSize(400, 80))
 
         right_panel = QHBoxLayout()
-        right_panel.setContentsMargins(2,2,2,2)
+        right_panel.setContentsMargins(2, 2, 2, 2)
         right_panel.setSpacing(5)
         right_panel.addWidget(select_all_btn)
         right_panel.addWidget(select_none_btn)
@@ -147,15 +157,21 @@ class MainWindow(QMainWindow):
         right_panel.addWidget(settings_btn)
         right_widget = QWidget()
         right_widget.setLayout(right_panel)
-        right_widget.setFixedWidth(600)
+        right_widget.setFixedSize(QSize(600, 80))
 
-        toolbar = QHBoxLayout()
-        toolbar.addWidget(left_widget)
-        toolbar.addWidget(right_widget)
+        toolbar_widget = QWidget()
+        toolbar_layout = QHBoxLayout()
+        toolbar_layout.setContentsMargins(0, 0, 0, 0)
+        toolbar_layout.setSpacing(0)
+        toolbar_layout.addWidget(left_widget)
+        toolbar_layout.addWidget(right_widget)
+        toolbar_layout.addStretch()
+        toolbar_widget.setLayout(toolbar_layout)
+        toolbar_widget.setFixedHeight(80)
 
         main_box = QVBoxLayout()
-        main_box.addLayout(self._grid)
-        main_box.addLayout(toolbar)
+        main_box.addLayout(self._grid, stretch=1)
+        main_box.addWidget(toolbar_widget, stretch=0)
 
         central = QWidget()
         central.setLayout(main_box)
@@ -170,14 +186,22 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+Z"), self).activated.connect(self._undo)
         QShortcut(QKeySequence("Ctrl+Y"), self).activated.connect(self._redo)
         for i in range(7):
-            QShortcut(QKeySequence(str(i)), self).activated.connect(
+            QShortcut(QKeySequence(f"Alt+{i}"), self).activated.connect(
                 lambda checked=False, label_id=i: self._set_label(label_id)
+            )
+        for i in range(10):
+            QShortcut(QKeySequence(str(i)), self).activated.connect(
+                lambda checked=False, view_idx=i: self._select_view(view_idx)
             )
 
     def _set_label(self, label_id: int) -> None:
         """Set active label from keyboard shortcut, syncing the Legend widget."""
         self._config["active_label"] = label_id
         self._legend.set_active_label(label_id)
+
+    def _select_view(self, view_idx: int) -> None:
+        """Select channel view by keyboard shortcut (0 = rgb, 1-9 = channel index)."""
+        self._channel_view.select_view(view_idx)
 
     # ------------------------------------------------------------------
     # Settings
@@ -357,6 +381,14 @@ class MainWindow(QMainWindow):
         self._update_page_label()
         self._init_grid()
 
+    def _on_view_changed(self, channel_idx: Optional[int]) -> None:
+        """Switch between RGB composite and single-channel grayscale view."""
+        if self._eventset is None:
+            return
+        self._view_channel = channel_idx
+        self._clear_page_cache()
+        self._reset_grid()
+
     # ------------------------------------------------------------------
     # Navigation
     # ------------------------------------------------------------------
@@ -425,16 +457,26 @@ class MainWindow(QMainWindow):
         """Read and render images for page_num into a (page_size, H, W, 3) array."""
         page_size = self._x_size * self._y_size
         event_ids = self._get_page_event_ids(page_num)
+        n_channels = len(self._config["channels"])
 
-        channel_colors = [
-            ch.get("display_color", "none") for ch in self._config["channels"]
-        ]
-        channel_gains = [
-            float(ch.get("gain", 1.0)) for ch in self._config["channels"]
-        ]
+        if self._view_channel is not None and self._view_channel < n_channels:
+            channel_colors = ["none"] * n_channels
+            channel_colors[self._view_channel] = "gray"
+            channel_gains = [1.0] * n_channels
+        else:
+            channel_colors = [
+                ch.get("display_color", "none") for ch in self._config["channels"]
+            ]
+            channel_gains = [
+                float(ch.get("gain", 1.0)) for ch in self._config["channels"]
+            ]
 
         raw = self._eventset.read_images(event_ids)
         rgb = channels_to_rgb8(raw, channel_colors, channel_gains)
+
+        master_gain = float(self._config.get("master_gain", 1.0))
+        if master_gain != 1.0:
+            rgb = np.clip(rgb.astype(np.float32) * master_gain, 0, 255).astype(np.uint8)
 
         if self._config.get("show_masks"):
             masks = self._eventset.read_masks(event_ids)
@@ -516,6 +558,8 @@ class MainWindow(QMainWindow):
         self._undo_history = np.empty((0, self._n_events), dtype=label_dtype)
         self._redo_history = np.empty((0, self._n_events), dtype=label_dtype)
         self._sort_panel.set_columns(list(eventset.df.columns))
+        self._view_channel = None
+        self._channel_view.set_channels(eventset.channel_names)
         self._f_name = path.stem
         self._current_page = 1
         self.setWindowTitle(f"AnnotateEZ — {path.stem}")

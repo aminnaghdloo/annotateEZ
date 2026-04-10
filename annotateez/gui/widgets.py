@@ -5,7 +5,7 @@ keeping the UI and config in sync without an intermediate model layer.
 """
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from PyQt5.QtCore import Qt, QPoint, QSize, pyqtSignal
 from PyQt5.QtGui import QColor, QIcon, QImage, QPainter, QPen, QPixmap
@@ -164,59 +164,90 @@ class LabelWidget(QWidget):
         self._config["labels"][self._id]["name"] = self.textbox.text()
 
 
-class ChannelWidget(QWidget):
-    """Settings row for mapping a single channel to a display color and gain.
+class ColorChannelWidget(QWidget):
+    """Settings row mapping one display color to a channel.
 
-    Shows the channel name, a display-color combo box, and a gain spin box.
-    Updates ``config['channels'][channel_idx]`` in place.
+    Shows a color swatch, color name, a channel-selection dropdown, and a
+    gain spinbox. Exactly one channel (or none) may be assigned to each
+    display color. Mutations go directly to ``config['channels']``.
     """
 
-    def __init__(self, config: Dict[str, Any], channel_idx: int) -> None:
+    def __init__(self, config: Dict[str, Any], color: str) -> None:
         super().__init__()
         self._config = config
-        self._idx = channel_idx
+        self._color = color
 
-        channel_cfg = config["channels"][channel_idx]
+        swatch = QLabel()
+        px = QPixmap(_SWATCH_SIZE, _SWATCH_SIZE)
+        px.fill(QColor(_COLOR_TO_QT.get(color, Qt.white)))
+        swatch.setPixmap(px)
 
-        name_label = QLabel(channel_cfg["name"])
-        name_label.setFixedHeight(24)
+        color_label = QLabel(color)
+        color_label.setFixedWidth(32)
 
-        self.combo = QComboBox()
-        self.combo.addItems(DISPLAY_COLORS)
-        current = channel_cfg.get("display_color", "none")
-        if current in DISPLAY_COLORS:
-            self.combo.setCurrentText(current)
-        self.combo.currentTextChanged.connect(self._on_color_changed)
+        self._combo = QComboBox()
+        self._combo.addItem("none")
+        for ch in config["channels"]:
+            self._combo.addItem(ch["name"])
 
-        self.gain_spin = QDoubleSpinBox()
-        self.gain_spin.setRange(0.01, 1000.0)
-        self.gain_spin.setDecimals(2)
-        self.gain_spin.setSingleStep(0.5)
-        self.gain_spin.setValue(float(channel_cfg.get("gain", 1.0)))
-        self.gain_spin.setFixedWidth(72)
-        self.gain_spin.valueChanged.connect(self._on_gain_changed)
+        self._gain_spin = QDoubleSpinBox()
+        self._gain_spin.setRange(0.01, 1000.0)
+        self._gain_spin.setDecimals(2)
+        self._gain_spin.setSingleStep(0.5)
+        self._gain_spin.setFixedWidth(72)
+
+        current = self._find_channel()
+        if current is not None:
+            self._combo.setCurrentText(current["name"])
+            self._gain_spin.setValue(float(current.get("gain", 1.0)))
+        else:
+            self._gain_spin.setValue(1.0)
+            self._gain_spin.setEnabled(False)
+
+        self._combo.currentTextChanged.connect(self._on_channel_changed)
+        self._gain_spin.valueChanged.connect(self._on_gain_changed)
 
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(5)
-        layout.addWidget(name_label)
-        layout.addWidget(self.combo)
-        layout.addWidget(self.gain_spin)
+        layout.addWidget(swatch)
+        layout.addWidget(color_label)
+        layout.addWidget(self._combo)
+        layout.addWidget(self._gain_spin)
         self.setLayout(layout)
 
-    def _on_color_changed(self, color: str) -> None:
-        self._config["channels"][self._idx]["display_color"] = color
+    def _find_channel(self) -> Optional[Dict[str, Any]]:
+        """Return the channel config entry assigned to this color, or None."""
+        for ch in self._config["channels"]:
+            if ch.get("display_color") == self._color:
+                return ch
+        return None
+
+    def _on_channel_changed(self, name: str) -> None:
+        for ch in self._config["channels"]:
+            if ch.get("display_color") == self._color:
+                ch["display_color"] = "none"
+        if name != "none":
+            for ch in self._config["channels"]:
+                if ch["name"] == name:
+                    ch["display_color"] = self._color
+                    self._gain_spin.setValue(float(ch.get("gain", 1.0)))
+                    self._gain_spin.setEnabled(True)
+                    return
+        self._gain_spin.setEnabled(False)
 
     def _on_gain_changed(self, value: float) -> None:
-        self._config["channels"][self._idx]["gain"] = value
+        ch = self._find_channel()
+        if ch is not None:
+            ch["gain"] = value
 
 
 class TextBox(QWidget):
     """Labeled text input that updates a single config key on change.
 
-    Preserves the existing value type: int config values are parsed as
-    int; all others are stored as str. Invalid int input is silently
-    ignored to avoid partial updates during typing.
+    Preserves the existing value type: int config values are parsed as int,
+    float values as float, all others as str. Invalid numeric input is
+    silently ignored to avoid partial updates during typing.
     """
 
     def __init__(
@@ -247,9 +278,15 @@ class TextBox(QWidget):
         text = self.textbox.text()
         if not text:
             return
-        if isinstance(self._config[self._key], int):
+        current = self._config[self._key]
+        if isinstance(current, int):
             try:
                 self._config[self._key] = int(text)
+            except ValueError:
+                pass
+        elif isinstance(current, float):
+            try:
+                self._config[self._key] = float(text)
             except ValueError:
                 pass
         else:
@@ -324,6 +361,47 @@ class Pos(QWidget):
         if self._dragging:
             self._dragging = False
             self.drag_ended.emit()
+
+
+class ChannelViewSelector(QWidget):
+    """Dropdown to switch between the RGB composite view and a single-channel
+    grayscale view.
+
+    Emits ``view_changed(channel_idx)`` where channel_idx is None for the
+    RGB composite or an int index for single-channel grayscale.
+    """
+
+    view_changed = pyqtSignal(object)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._combo = QComboBox()
+        self._combo.addItem("rgb")
+        self._combo.currentIndexChanged.connect(self._on_changed)
+
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        layout.addWidget(QLabel("View:"))
+        layout.addWidget(self._combo)
+        self.setLayout(layout)
+
+    def set_channels(self, channel_names: List[str]) -> None:
+        """Repopulate the dropdown with channel names, keeping 'rgb' first."""
+        self._combo.blockSignals(True)
+        self._combo.clear()
+        self._combo.addItem("rgb")
+        self._combo.addItems(channel_names)
+        self._combo.blockSignals(False)
+        self._combo.setCurrentIndex(0)
+
+    def select_view(self, combo_idx: int) -> None:
+        """Programmatically select a view by combo index (0 = rgb, 1+ = channel)."""
+        if 0 <= combo_idx < self._combo.count():
+            self._combo.setCurrentIndex(combo_idx)
+
+    def _on_changed(self, idx: int) -> None:
+        self.view_changed.emit(None if idx == 0 else idx - 1)
 
 
 class SortPanel(QWidget):
