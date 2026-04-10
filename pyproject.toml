@@ -7,7 +7,7 @@ name = "annotate-ez"
 version = "0.1.0"
 description = "A GUI tool for visualizing and annotating immunofluorescence microscopy cell images."
 readme = "README.md"
-license = { text = "MIT" }
+license = {text = "GPL-3.0-or-later"}
 authors = [{ name = "Amin Naghdloo", email = "amin.naghdloo@gmail.com" }]
 keywords = [
     "microscopy",
@@ -19,7 +19,7 @@ keywords = [
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",

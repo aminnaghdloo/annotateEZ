@@ -1,3 +1,5 @@
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+
 # AnnotateEZ
 
 A lightweight GUI tool for visualizing and annotating immunofluorescence (IF) microscopy cell images stored in HDF5 format.
@@ -96,7 +98,3 @@ All settings are also editable via the **Settings** dialog inside the app. Key o
 - numpy ≥ 1.21
 - tables ≥ 3.8
 - PyYAML ≥ 6.0
-
-## License
-
-MIT © Amin Naghdloo
