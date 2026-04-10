@@ -3,7 +3,7 @@
 import logging
 import math
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 from PyQt5.QtCore import Qt, QSize
@@ -61,6 +61,8 @@ class MainWindow(QMainWindow):
         self._current_page: int = 0
         self._n_pages: int = 0
         self._f_name: str = ""
+        self._undo_history: np.ndarray = np.empty((0, 0))
+        self._redo_history: np.ndarray = np.empty((0, 0))
 
         self._open_settings()
         self._build_ui()
@@ -139,6 +141,8 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence(Qt.Key_Left), self).activated.connect(self._prev_page)
         QShortcut(QKeySequence(Qt.Key_Right), self).activated.connect(self._next_page)
         QShortcut(QKeySequence("Ctrl+S"), self).activated.connect(self._save_data)
+        QShortcut(QKeySequence("Ctrl+Z"), self).activated.connect(self._undo)
+        QShortcut(QKeySequence("Ctrl+Y"), self).activated.connect(self._redo)
         for i in range(7):
             QShortcut(QKeySequence(str(i)), self).activated.connect(
                 lambda checked=False, label_id=i: self._set_label(label_id)
@@ -223,8 +227,12 @@ class MainWindow(QMainWindow):
 
     def _on_annotated(self, event_id: int, label: int) -> None:
         """Write a single tile annotation immediately to the DataFrame."""
-        if event_id < self._n_events:
-            self._eventset.df.label.iat[event_id] = label
+        if self._eventset is None or event_id >= self._n_events:
+            return
+        old_label = int(self._eventset.df.label.iat[event_id])
+        if old_label != label:
+            self._push_undo()
+        self._eventset.df.label.iat[event_id] = label
 
     def _sync_grid_to_df(self) -> None:
         """Flush all visible tile labels to the DataFrame."""
@@ -233,6 +241,42 @@ class MainWindow(QMainWindow):
                 w = self._grid.itemAtPosition(y, x).widget()
                 if w.event_id < self._n_events:
                     self._eventset.df.label.iat[w.event_id] = w.label
+
+    # ------------------------------------------------------------------
+    # Undo / Redo
+    # ------------------------------------------------------------------
+
+    def _push_undo(self) -> None:
+        """Snapshot current labels into the undo history."""
+        max_steps = self._config.get("history_steps", 3)
+        snapshot = self._eventset.df["label"].to_numpy(copy=True)
+        self._undo_history = np.vstack([self._undo_history, snapshot[np.newaxis, :]])
+        if len(self._undo_history) > max_steps:
+            self._undo_history = self._undo_history[-max_steps:]
+        self._redo_history = np.empty((0, self._n_events), dtype=snapshot.dtype)
+
+    def _undo(self) -> None:
+        if self._eventset is None or len(self._undo_history) == 0:
+            return
+        current = self._eventset.df["label"].to_numpy(copy=True)
+        self._redo_history = np.vstack([self._redo_history, current[np.newaxis, :]])
+        snapshot = self._undo_history[-1]
+        self._undo_history = self._undo_history[:-1]
+        self._eventset.df["label"] = snapshot
+        self._reset_grid()
+
+    def _redo(self) -> None:
+        if self._eventset is None or len(self._redo_history) == 0:
+            return
+        max_steps = self._config.get("history_steps", 3)
+        current = self._eventset.df["label"].to_numpy(copy=True)
+        self._undo_history = np.vstack([self._undo_history, current[np.newaxis, :]])
+        if len(self._undo_history) > max_steps:
+            self._undo_history = self._undo_history[-max_steps:]
+        snapshot = self._redo_history[-1]
+        self._redo_history = self._redo_history[:-1]
+        self._eventset.df["label"] = snapshot
+        self._reset_grid()
 
     # ------------------------------------------------------------------
     # Navigation
@@ -263,6 +307,9 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _select_all(self) -> None:
+        if self._eventset is None:
+            return
+        self._push_undo()
         active = self._config["active_label"]
         for x in range(self._x_size):
             for y in range(self._y_size):
@@ -272,6 +319,9 @@ class MainWindow(QMainWindow):
         self._sync_grid_to_df()
 
     def _select_none(self) -> None:
+        if self._eventset is None:
+            return
+        self._push_undo()
         for x in range(self._x_size):
             for y in range(self._y_size):
                 w = self._grid.itemAtPosition(y, x).widget()
@@ -340,6 +390,9 @@ class MainWindow(QMainWindow):
         self._eventset = eventset
         self._n_events = len(eventset.df)
         self._n_pages = math.ceil(self._n_events / (self._x_size * self._y_size))
+        label_dtype = eventset.df["label"].dtype
+        self._undo_history = np.empty((0, self._n_events), dtype=label_dtype)
+        self._redo_history = np.empty((0, self._n_events), dtype=label_dtype)
         self._rgb_images = self._render_rgb()
         self._f_name = path.stem
         self._current_page = 1

@@ -24,6 +24,7 @@ DISPLAY_COLORS: List[str] = ["red", "green", "blue", "gray", "none"]
 DEFAULT_CONFIG: Dict[str, Any] = {
     "active_label": 1,
     "channels": [],
+    "history_steps": 3,
     "data_key": "features",
     "image_key": "images",
     "mask_key": "masks",
