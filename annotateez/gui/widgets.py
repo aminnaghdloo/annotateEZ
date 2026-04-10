@@ -5,7 +5,7 @@ keeping the UI and config in sync without an intermediate model layer.
 """
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from PyQt5.QtCore import Qt, QSize, pyqtSignal
 from PyQt5.QtGui import QColor, QImage, QPainter, QPen
@@ -13,7 +13,6 @@ from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -53,11 +52,10 @@ def _label_color(config: Dict[str, Any], label_id: int) -> QColor:
 
 
 class Legend(QWidget):
-    """Radio-button group for selecting the active annotation label.
+    """Dropdown for selecting the active annotation label.
 
-    Displays one button per active label, arranged in a two-row grid.
-    Emits ``label_changed(label_id)`` when the selection changes and
-    updates ``config['active_label']`` in place.
+    Displays one entry per active label. Emits ``label_changed(label_id)``
+    when the selection changes and updates ``config['active_label']`` in place.
     """
 
     label_changed = pyqtSignal(int)
@@ -65,34 +63,36 @@ class Legend(QWidget):
     def __init__(self, config: Dict[str, Any]) -> None:
         super().__init__()
         self._config = config
-        layout = QGridLayout()
+        self._id_map: List[int] = []  # combo index → label_id
 
-        counter = 0
+        self._combo = QComboBox()
         for i, label in enumerate(config["labels"]):
             if label["active"]:
-                btn = QRadioButton(label["name"])
-                btn.setFixedSize(QSize(64, 30))
-                btn._label_id = i
-                if i == config["active_label"]:
-                    btn.setChecked(True)
-                btn.toggled.connect(self._on_toggled)
-                layout.addWidget(btn, counter % 2, counter // 2)
-                counter += 1
+                self._combo.addItem(label["name"])
+                self._id_map.append(i)
 
+        active = config.get("active_label", 1)
+        if active in self._id_map:
+            self._combo.setCurrentIndex(self._id_map.index(active))
+
+        self._combo.currentIndexChanged.connect(self._on_changed)
+
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(QLabel("Label:"))
+        layout.addWidget(self._combo)
         self.setLayout(layout)
 
-    def _on_toggled(self) -> None:
-        btn = self.sender()
-        if btn.isChecked():
-            self._config["active_label"] = btn._label_id
-            self.label_changed.emit(btn._label_id)
+    def _on_changed(self, idx: int) -> None:
+        if 0 <= idx < len(self._id_map):
+            label_id = self._id_map[idx]
+            self._config["active_label"] = label_id
+            self.label_changed.emit(label_id)
 
     def set_active_label(self, label_id: int) -> None:
-        """Check the radio button for label_id if it exists in this widget."""
-        for btn in self.findChildren(QRadioButton):
-            if btn._label_id == label_id:
-                btn.setChecked(True)
-                return
+        """Update the dropdown to reflect label_id if it is present."""
+        if label_id in self._id_map:
+            self._combo.setCurrentIndex(self._id_map.index(label_id))
 
 
 class LabelWidget(QWidget):
