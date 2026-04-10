@@ -24,7 +24,7 @@ from PyQt5.QtWidgets import (
 from annotateez.config import merge_channels
 from annotateez.core.image import channels_to_rgb8, overlay_mask_boundaries
 from annotateez.gui.settings_dialog import SettingsDialog
-from annotateez.gui.widgets import Legend, Pos
+from annotateez.gui.widgets import Legend, Pos, SortPanel
 from annotateez.io.eventset import EventSet
 
 logger = logging.getLogger(__name__)
@@ -61,6 +61,7 @@ class MainWindow(QMainWindow):
         self._current_page: int = 0
         self._n_pages: int = 0
         self._f_name: str = ""
+        self._display_order: Optional[np.ndarray] = None
         self._undo_history: np.ndarray = np.empty((0, 0))
         self._redo_history: np.ndarray = np.empty((0, 0))
 
@@ -95,6 +96,9 @@ class MainWindow(QMainWindow):
 
         self._legend = Legend(self._config)
 
+        self._sort_panel = SortPanel()
+        self._sort_panel.sort_requested.connect(self._apply_sort)
+
         select_all_btn = _tool_button("All", "check_all.png")
         select_all_btn.pressed.connect(self._select_all)
 
@@ -126,6 +130,7 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(save_btn)
         toolbar.addWidget(load_btn)
         toolbar.addWidget(settings_btn)
+        toolbar.addWidget(self._sort_panel)
 
         main_box = QVBoxLayout()
         main_box.addLayout(self._grid)
@@ -184,6 +189,12 @@ class MainWindow(QMainWindow):
             + x + self._x_size * y
         )
 
+    def _event_id(self, display_idx: int) -> int:
+        """Map display position to DataFrame row index, respecting sort order."""
+        if self._display_order is not None and display_idx < self._n_events:
+            return int(self._display_order[display_idx])
+        return display_idx
+
     def _make_qimage(self, event_id: int) -> QImage:
         img = self._rgb_images[event_id]
         h, w = img.shape[:2]
@@ -204,7 +215,7 @@ class MainWindow(QMainWindow):
         self._clear_grid()
         for x in range(self._x_size):
             for y in range(self._y_size):
-                event_id = self._tile_index(x, y)
+                event_id = self._event_id(self._tile_index(x, y))
                 w = Pos(
                     self._config,
                     event_id,
@@ -217,7 +228,7 @@ class MainWindow(QMainWindow):
     def _reset_grid(self) -> None:
         for x in range(self._x_size):
             for y in range(self._y_size):
-                event_id = self._tile_index(x, y)
+                event_id = self._event_id(self._tile_index(x, y))
                 w = self._grid.itemAtPosition(y, x).widget()
                 w.reset(event_id, self._make_qimage(event_id), self._get_label(event_id))
 
@@ -280,6 +291,21 @@ class MainWindow(QMainWindow):
         self._redo_history = self._redo_history[:-1]
         self._eventset.df["label"] = snapshot
         self._reset_grid()
+
+    # ------------------------------------------------------------------
+    # Sort
+    # ------------------------------------------------------------------
+
+    def _apply_sort(self, column: str, ascending: bool) -> None:
+        """Reorder event display by a DataFrame column without mutating the data."""
+        if self._eventset is None:
+            return
+        self._sync_grid_to_df()
+        order = np.argsort(self._eventset.df[column].to_numpy(), kind="stable")
+        self._display_order = order if ascending else order[::-1]
+        self._current_page = 1
+        self._update_page_label()
+        self._init_grid()
 
     # ------------------------------------------------------------------
     # Navigation
@@ -393,9 +419,11 @@ class MainWindow(QMainWindow):
         self._eventset = eventset
         self._n_events = len(eventset.df)
         self._n_pages = math.ceil(self._n_events / (self._x_size * self._y_size))
+        self._display_order = None
         label_dtype = eventset.df["label"].dtype
         self._undo_history = np.empty((0, self._n_events), dtype=label_dtype)
         self._redo_history = np.empty((0, self._n_events), dtype=label_dtype)
+        self._sort_panel.set_columns(list(eventset.df.columns))
         self._rgb_images = self._render_rgb()
         self._f_name = path.stem
         self._current_page = 1

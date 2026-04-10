@@ -16,6 +16,7 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPushButton,
     QRadioButton,
     QWidget,
 )
@@ -289,3 +290,47 @@ class Pos(QWidget):
             return
         self.annotated.emit(self.event_id, self.label)
         self.update()
+
+
+class SortPanel(QWidget):
+    """Controls for sorting events by a DataFrame column.
+
+    Provides a column dropdown, ascending/descending radio buttons,
+    and an Apply button. Emits ``sort_requested(column, ascending)``
+    when Apply is clicked.
+    """
+
+    sort_requested = pyqtSignal(str, bool)
+
+    def __init__(self) -> None:
+        super().__init__()
+
+        self._col_combo = QComboBox()
+        self._col_combo.setMinimumWidth(120)
+
+        self._asc_btn = QRadioButton("Asc")
+        self._desc_btn = QRadioButton("Desc")
+        self._asc_btn.setChecked(True)
+
+        apply_btn = QPushButton("Sort")
+        apply_btn.pressed.connect(self._on_apply)
+
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        layout.addWidget(QLabel("Sort by:"))
+        layout.addWidget(self._col_combo)
+        layout.addWidget(self._asc_btn)
+        layout.addWidget(self._desc_btn)
+        layout.addWidget(apply_btn)
+        self.setLayout(layout)
+
+    def set_columns(self, columns: List[str]) -> None:
+        """Populate the column dropdown with DataFrame column names."""
+        self._col_combo.clear()
+        self._col_combo.addItems(columns)
+
+    def _on_apply(self) -> None:
+        col = self._col_combo.currentText()
+        if col:
+            self.sort_requested.emit(col, self._asc_btn.isChecked())
