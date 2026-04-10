@@ -133,6 +133,22 @@ class MainWindow(QMainWindow):
         central.setLayout(main_box)
         self.setCentralWidget(central)
 
+        self._setup_shortcuts()
+
+    def _setup_shortcuts(self) -> None:
+        QShortcut(QKeySequence(Qt.Key_Left), self).activated.connect(self._prev_page)
+        QShortcut(QKeySequence(Qt.Key_Right), self).activated.connect(self._next_page)
+        QShortcut(QKeySequence("Ctrl+S"), self).activated.connect(self._save_data)
+        for i in range(7):
+            QShortcut(QKeySequence(str(i)), self).activated.connect(
+                lambda checked=False, label_id=i: self._set_label(label_id)
+            )
+
+    def _set_label(self, label_id: int) -> None:
+        """Set active label from keyboard shortcut, syncing the Legend widget."""
+        self._config["active_label"] = label_id
+        self._legend.set_active_label(label_id)
+
     # ------------------------------------------------------------------
     # Settings
     # ------------------------------------------------------------------

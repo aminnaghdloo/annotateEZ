@@ -87,6 +87,13 @@ class Legend(QWidget):
             self._config["active_label"] = btn._label_id
             self.label_changed.emit(btn._label_id)
 
+    def set_active_label(self, label_id: int) -> None:
+        """Check the radio button for label_id if it exists in this widget."""
+        for btn in self.findChildren(QRadioButton):
+            if btn._label_id == label_id:
+                btn.setChecked(True)
+                return
+
 
 class LabelWidget(QWidget):
     """Settings row for configuring a single label (name and active state).
