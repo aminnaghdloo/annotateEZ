@@ -1,4 +1,5 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19503122.svg)](https://doi.org/10.5281/zenodo.19503122)
 
 # AnnotateEZ
 
@@ -99,3 +100,20 @@ All settings are also editable via the **Settings** dialog inside the app. Key o
 - numpy ≥ 1.21
 - tables ≥ 3.8
 - PyYAML ≥ 6.0
+
+## Citation
+
+If you use this software, please cite:
+
+```bibtex
+@software{amin_naghdloo_2026_19503122,
+  author       = {Amin Naghdloo},
+  title        = {aminnaghdloo/annotateEZ: v0.1.0z},
+  month        = apr,
+  year         = 2026,
+  publisher    = {Zenodo},
+  version      = {v0.1.0z},
+  doi          = {10.5281/zenodo.19503122},
+  url          = {https://doi.org/10.5281/zenodo.19503122}
+}
+```
