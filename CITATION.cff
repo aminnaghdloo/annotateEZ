@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+title: annotateEZ
+message: "If you use this software, please cite it as below."
+authors:
+  - family-names: Naghdloo
+    given-names: Amin
+doi: 10.5281/zenodo.19503122
+version: v0.1.0z
+date-released: 2026-04
